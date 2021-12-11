@@ -80,7 +80,7 @@ func TestLocalStore(t *testing.T) {
 		time.Sleep(10 * time.Millisecond) // Wait for goroutine to remove old revisions.
 
 		for i, data := range tt.Data {
-			f, err := store.Get(tt.Key, i+1)
+			f, meta, err := store.Get(tt.Key, i+1)
 			if f != nil {
 				defer f.Close()
 			}
@@ -92,6 +92,18 @@ func TestLocalStore(t *testing.T) {
 			} else {
 				if err != nil {
 					t.Fatalf("%s#%d: failed to get revision %d: %s", tt.Key, tt.Revision, i+1, err)
+				}
+
+				if meta.Key != tt.Key {
+					t.Fatalf("%s#%d: key of #%d should be %s but got %s", tt.Key, tt.Revision, i+1, tt.Key, meta.Key)
+				}
+
+				if meta.Revision != i+1 {
+					t.Fatalf("%s#%d: revision of #%d should be %d but got %d", tt.Key, tt.Revision, i+1, i+1, meta.Revision)
+				}
+
+				if meta.Size != len(data) {
+					t.Fatalf("%s#%d: size of #%d should be %d but got %d", tt.Key, tt.Revision, i+1, len(data), meta.Size)
 				}
 
 				buf := &bytes.Buffer{}

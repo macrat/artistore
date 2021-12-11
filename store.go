@@ -2,8 +2,11 @@ package main
 
 import (
 	"compress/gzip"
+	"crypto/md5"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"hash"
 	"io"
 	"mime"
 	"net/http"
@@ -22,9 +25,11 @@ var (
 )
 
 type Metadata struct {
-	Key       string    `json:"key"`
+	Key       string    `json:"-"`
 	Revision  int       `json:"revision"`
 	Type      string    `json:"type"`
+	Size      int       `json:"size"`
+	Hash      string    `json:"md5"`
 	Timestamp time.Time `json:"-"`
 }
 
@@ -36,7 +41,7 @@ type RetainPolicy struct {
 type Store interface {
 	Latest(key string) (revision int, err error)
 	Metadata(key string, revision int) (Metadata, error)
-	Get(key string, revision int) (io.ReadCloser, error)
+	Get(key string, revision int) (io.ReadCloser, Metadata, error)
 	Put(key string, r io.Reader) (revision int, err error)
 	Sweep()
 }
@@ -115,6 +120,7 @@ func (f LocalFileReader) Metadata() (Metadata, error) {
 		return Metadata{}, err
 	}
 
+	meta.Key = f.z.Name
 	meta.Timestamp = f.z.ModTime
 
 	return meta, nil
@@ -139,19 +145,24 @@ func (s LocalStore) Metadata(key string, revision int) (Metadata, error) {
 	return f.Metadata()
 }
 
-func (s LocalStore) Get(key string, revision int) (io.ReadCloser, error) {
+func (s LocalStore) Get(key string, revision int) (io.ReadCloser, Metadata, error) {
 	f, err := s.open(key, revision)
 	if errors.Is(err, os.ErrNotExist) {
 		if latest, err := s.Latest(key); err != nil {
-			return nil, ErrNoSuchArtifact
+			return nil, Metadata{}, ErrNoSuchArtifact
 		} else if revision < latest {
-			return nil, ErrRevisionDeleted
+			return nil, Metadata{}, ErrRevisionDeleted
 		}
 	} else if err != nil {
-		return nil, err
+		return nil, Metadata{}, err
 	}
 
-	return f, err
+	meta, err := f.Metadata()
+	if err != nil {
+		return nil, Metadata{}, err
+	}
+
+	return f, meta, err
 }
 
 type LocalFileWriter struct {
@@ -159,7 +170,7 @@ type LocalFileWriter struct {
 	z *gzip.Writer
 }
 
-func (s LocalStore) create(key string, meta Metadata) (w LocalFileWriter, revision int, err error) {
+func (s LocalStore) create(key string) (w LocalFileWriter, revision int, err error) {
 	revision, _ = s.Latest(key)
 	revision++
 
@@ -175,13 +186,6 @@ func (s LocalStore) create(key string, meta Metadata) (w LocalFileWriter, revisi
 
 	z := gzip.NewWriter(f)
 
-	z.Name = key
-	z.ModTime = time.Now()
-	z.Extra, err = json.Marshal(meta)
-	if err != nil {
-		return
-	}
-
 	return LocalFileWriter{f, z}, revision, nil
 }
 
@@ -192,8 +196,22 @@ func (f LocalFileWriter) Close() error {
 	return f.f.Close()
 }
 
+func (f LocalFileWriter) SetMetadata(meta Metadata) (err error) {
+	f.z.Name = meta.Key
+	f.z.ModTime = time.Now()
+	f.z.Extra, err = json.Marshal(meta)
+	return
+}
+
 func (f LocalFileWriter) Write(p []byte) (int, error) {
 	return f.z.Write(p)
+}
+
+func (f LocalFileWriter) Remove() error {
+	if err := f.Close(); err != nil {
+		return err
+	}
+	return os.Remove(f.f.Name())
 }
 
 func detectContentType(key string, data []byte) string {
@@ -221,22 +239,40 @@ func (s LocalStore) Put(key string, r io.Reader) (revision int, err error) {
 		return 0, err
 	}
 
-	f, revision, err := s.create(key, Metadata{
-		Key:      key,
-		Revision: revision,
-		Type:     detectContentType(key, head[:n]),
-	})
+	f, revision, err := s.create(key)
 	if err != nil {
 		return 0, err
 	}
 	defer f.Close()
 
-	if _, err = f.Write(head[:n]); err != nil {
+	temp, err := NewTempFile()
+	if err != nil {
+		f.Remove()
+		return 0, err
+	}
+	defer temp.Close()
+
+	if _, err = temp.Write(head[:n]); err != nil {
+		f.Remove()
 		return 0, err
 	}
 
-	_, err = io.Copy(f, r)
+	_, err = io.Copy(temp, r)
 	if err != nil {
+		f.Remove()
+		return 0, err
+	}
+
+	f.SetMetadata(Metadata{
+		Key:      key,
+		Revision: revision,
+		Type:     detectContentType(key, head[:n]),
+		Size:     temp.Size(),
+		Hash:     temp.Hash(),
+	})
+
+	if err = temp.CopyTo(f); err != nil {
+		f.Remove()
 		return 0, err
 	}
 
@@ -341,4 +377,62 @@ func (s LocalStore) Sweep() {
 	for _, x := range xs {
 		s.sweepByTime(s.unescape(x.Name()))
 	}
+}
+
+type TempFile struct {
+	file *os.File
+	hash hash.Hash
+	size int
+}
+
+func NewTempFile() (*TempFile, error) {
+	f, err := os.CreateTemp("", "artistore-temp")
+	if err != nil {
+		return nil, err
+	}
+	return &TempFile{f, md5.New(), 0}, nil
+}
+
+func (f *TempFile) PrepareToRead() error {
+	if err := f.file.Sync(); err != nil {
+		return err
+	}
+	_, err := f.file.Seek(0, os.SEEK_SET)
+	return err
+}
+
+func (f *TempFile) Write(p []byte) (n int, err error) {
+	n, err = f.file.Write(p)
+	if err != nil {
+		return
+	}
+	f.size += n
+
+	_, err = f.hash.Write(p)
+	return
+}
+
+func (f *TempFile) Read(p []byte) (int, error) {
+	return f.file.Read(p)
+}
+
+func (f *TempFile) CopyTo(w io.Writer) error {
+	if err := f.PrepareToRead(); err != nil {
+		return err
+	}
+	_, err := io.Copy(w, f.file)
+	return err
+}
+
+func (f *TempFile) Size() int {
+	return f.size
+}
+
+func (f *TempFile) Hash() string {
+	return fmt.Sprintf("%032x", f.hash.Sum(nil))
+}
+
+func (f *TempFile) Close() error {
+	f.file.Close()
+	return os.Remove(f.file.Name())
 }

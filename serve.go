@@ -125,13 +125,22 @@ func (s Server) Get(w http.ResponseWriter, r *http.Request) {
 
 		w.Header().Set("Content-Type", meta.Type)
 
-		f, err := s.Store.Get(key, rev)
+		f, meta, err := s.Store.Get(key, rev)
 		if err != nil {
 			PrintErr("ERROR", "%s", err)
 			w.WriteHeader(http.StatusInternalServerError)
 			fmt.Fprintln(w, InternalServerErrorMessage)
 		}
 		defer f.Close()
+
+		w.Header().Set("Content-Length", strconv.Itoa(meta.Size))
+		w.Header().Set("Etag", meta.Hash)
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+
+		if hash := r.Header.Get("If-None-Match"); hash == meta.Hash {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
 
 		if _, err = io.Copy(w, f); err != nil {
 			PrintErr("ERROR", "%s", err)

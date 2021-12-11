@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strconv"
@@ -124,8 +125,15 @@ func (s Server) Get(w http.ResponseWriter, r *http.Request) {
 
 		w.Header().Set("Content-Type", meta.Type)
 
-		err = s.Store.Get(w, key, rev)
+		f, err := s.Store.Get(key, rev)
 		if err != nil {
+			PrintErr("ERROR", "%s", err)
+			w.WriteHeader(http.StatusInternalServerError)
+			fmt.Fprintln(w, InternalServerErrorMessage)
+		}
+		defer f.Close()
+
+		if _, err = io.Copy(w, f); err != nil {
 			PrintErr("ERROR", "%s", err)
 			w.WriteHeader(http.StatusInternalServerError)
 			fmt.Fprintln(w, InternalServerErrorMessage)

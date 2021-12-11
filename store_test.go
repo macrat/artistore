@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"io"
 	"testing"
 	"time"
 )
@@ -79,8 +80,10 @@ func TestLocalStore(t *testing.T) {
 		time.Sleep(10 * time.Millisecond) // Wait for goroutine to remove old revisions.
 
 		for i, data := range tt.Data {
-			buf := &bytes.Buffer{}
-			err = store.Get(buf, tt.Key, i+1)
+			f, err := store.Get(tt.Key, i+1)
+			if f != nil {
+				defer f.Close()
+			}
 
 			if data == nil {
 				if err != ErrRevisionDeleted {
@@ -90,6 +93,13 @@ func TestLocalStore(t *testing.T) {
 				if err != nil {
 					t.Fatalf("%s#%d: failed to get revision %d: %s", tt.Key, tt.Revision, i+1, err)
 				}
+
+				buf := &bytes.Buffer{}
+				_, err := io.Copy(buf, f)
+				if err != nil {
+					t.Fatalf("%s#%d: failed to read revision %d: %s", tt.Key, tt.Revision, i+1, err)
+				}
+
 				if !bytes.Equal(buf.Bytes(), data) {
 					t.Fatalf("%s#%d: unexpected body of revision %d: %q", tt.Key, tt.Revision, i+1, buf)
 				}

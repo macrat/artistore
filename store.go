@@ -36,7 +36,7 @@ type RetainPolicy struct {
 type Store interface {
 	Latest(key string) (revision int, err error)
 	Metadata(key string, revision int) (Metadata, error)
-	Get(w io.Writer, key string, revision int) error
+	Get(key string, revision int) (io.ReadCloser, error)
 	Put(key string, r io.Reader) (revision int, err error)
 	Sweep()
 }
@@ -139,21 +139,19 @@ func (s LocalStore) Metadata(key string, revision int) (Metadata, error) {
 	return f.Metadata()
 }
 
-func (s LocalStore) Get(w io.Writer, key string, revision int) error {
+func (s LocalStore) Get(key string, revision int) (io.ReadCloser, error) {
 	f, err := s.open(key, revision)
 	if errors.Is(err, os.ErrNotExist) {
 		if latest, err := s.Latest(key); err != nil {
-			return ErrNoSuchArtifact
+			return nil, ErrNoSuchArtifact
 		} else if revision < latest {
-			return ErrRevisionDeleted
+			return nil, ErrRevisionDeleted
 		}
 	} else if err != nil {
-		return err
+		return nil, err
 	}
-	defer f.Close()
 
-	_, err = io.Copy(w, f)
-	return err
+	return f, err
 }
 
 type LocalFileWriter struct {

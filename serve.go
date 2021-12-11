@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -15,7 +14,6 @@ import (
 )
 
 var (
-	NotFoundMessage            = "No such artifact on this server."
 	InternalServerErrorMessage = "Internal server error.\nPlease check server log if you are server administrator."
 )
 
@@ -33,7 +31,10 @@ var serveCmd = &cobra.Command{
 
 		s := Server{
 			Secret: sec,
-			Store:  LocalStore{viper.GetString("store")},
+			Store: LocalStore{
+				viper.GetString("store"),
+				RetainPolicy{viper.GetInt("retain-num")},
+			},
 		}
 		log.Print("Starting Artistore on ", viper.GetString("listen"))
 		http.ListenAndServe(viper.GetString("listen"), gziphandler.GzipHandler(s))
@@ -51,6 +52,9 @@ func init() {
 
 	serveCmd.Flags().String("store", "/var/lib/artistore", "Path to data directory.")
 	viper.BindPFlag("store", serveCmd.Flags().Lookup("store"))
+
+	serveCmd.Flags().Int("retain-num", 0, "Number of to retain revisions. (default retain all)")
+	viper.BindPFlag("retain-num", serveCmd.Flags().Lookup("retain-num"))
 }
 
 type Server struct {
@@ -82,9 +86,13 @@ func (s Server) Get(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintln(w, "Please specify the key of artifact.")
 	} else if rev, err := strconv.Atoi(r.URL.Query().Get("rev")); err == nil && rev > 0 {
 		meta, err := s.Store.Metadata(key, rev)
-		if errors.Is(err, os.ErrNotExist) {
+		if err == ErrNoSuchArtifact {
 			w.WriteHeader(http.StatusNotFound)
-			fmt.Fprintln(w, NotFoundMessage)
+			fmt.Fprintln(w, err)
+			return
+		} else if err == ErrRevisionDeleted {
+			w.WriteHeader(http.StatusGone)
+			fmt.Fprintln(w, err)
 			return
 		} else if err != nil {
 			log.Print(err)
@@ -103,9 +111,9 @@ func (s Server) Get(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		rev, err = s.Store.Latest(key)
-		if errors.Is(err, os.ErrNotExist) {
+		if err == ErrNoSuchArtifact {
 			w.WriteHeader(http.StatusNotFound)
-			fmt.Fprintln(w, NotFoundMessage)
+			fmt.Fprintln(w, err)
 		} else if err != nil {
 			log.Print(err)
 			w.WriteHeader(http.StatusInternalServerError)

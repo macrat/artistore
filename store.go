@@ -3,6 +3,7 @@ package main
 import (
 	"compress/gzip"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/url"
@@ -13,10 +14,19 @@ import (
 	"unicode/utf8"
 )
 
+var (
+	ErrRevisionDeleted = errors.New("This revesion has been deleted.")
+	ErrNoSuchArtifact  = errors.New("No such artifact on this server.")
+)
+
 type Metadata struct {
 	Key      string `json:"key"`
 	Revision int    `json:"revision"`
 	Type     string `json:"type"`
+}
+
+type RetainPolicy struct {
+	Num int
 }
 
 type Store interface {
@@ -27,7 +37,8 @@ type Store interface {
 }
 
 type LocalStore struct {
-	Path string
+	Path   string
+	Retain RetainPolicy
 }
 
 func (s LocalStore) escape(key string) (path string) {
@@ -44,7 +55,9 @@ func (s LocalStore) unescape(path string) (key string) {
 
 func (s LocalStore) Latest(key string) (revision int, err error) {
 	dir, err := os.Open(filepath.Join(s.Path, s.escape(key)))
-	if err != nil {
+	if errors.Is(err, os.ErrNotExist) {
+		return 0, ErrNoSuchArtifact
+	} else if err != nil {
 		return
 	}
 	defer dir.Close()
@@ -106,7 +119,13 @@ func (f LocalFileReader) Read(p []byte) (int, error) {
 
 func (s LocalStore) Metadata(key string, revision int) (Metadata, error) {
 	f, err := s.open(key, revision)
-	if err != nil {
+	if errors.Is(err, os.ErrNotExist) {
+		if latest, err := s.Latest(key); err != nil {
+			return Metadata{}, ErrNoSuchArtifact
+		} else if revision < latest {
+			return Metadata{}, ErrRevisionDeleted
+		}
+	} else if err != nil {
 		return Metadata{}, nil
 	}
 	defer f.Close()
@@ -116,7 +135,13 @@ func (s LocalStore) Metadata(key string, revision int) (Metadata, error) {
 
 func (s LocalStore) Get(w io.Writer, key string, revision int) error {
 	f, err := s.open(key, revision)
-	if err != nil {
+	if errors.Is(err, os.ErrNotExist) {
+		if latest, err := s.Latest(key); err != nil {
+			return ErrNoSuchArtifact
+		} else if revision < latest {
+			return ErrRevisionDeleted
+		}
+	} else if err != nil {
 		return err
 	}
 	defer f.Close()
@@ -204,5 +229,35 @@ func (s LocalStore) Put(key string, r io.Reader) (revision int, err error) {
 		return 0, err
 	}
 
+	go s.sweep(key, revision)
+
 	return revision, nil
+}
+
+func (s LocalStore) sweep(key string, latest int) {
+	if s.Retain.Num <= 0 {
+		return
+	}
+
+	dirname := filepath.Join(s.Path, s.escape(key))
+	dir, err := os.Open(dirname)
+	if err != nil {
+		return
+	}
+	defer dir.Close()
+
+	xs, err := dir.ReadDir(0)
+	if err != nil {
+		return
+	}
+
+	for _, x := range xs {
+		i, err := strconv.Atoi(x.Name())
+		if err != nil {
+			continue
+		}
+		if i <= latest-s.Retain.Num {
+			os.Remove(filepath.Join(dirname, x.Name()))
+		}
+	}
 }

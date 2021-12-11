@@ -3,71 +3,97 @@ package main
 import (
 	"bytes"
 	"testing"
+	"time"
 )
 
 func TestLocalStore(t *testing.T) {
-	store := LocalStore{t.TempDir()}
+	store := LocalStore{t.TempDir(), RetainPolicy{2}}
+
+	tests := []struct {
+		Key      string
+		Revision int
+		Data     [][]byte
+	}{
+		{
+			"hello",
+			1,
+			[][]byte{
+				[]byte("hello world"),
+			},
+		},
+		{
+			"hello",
+			2,
+			[][]byte{
+				[]byte("hello world"),
+				[]byte("this is a test"),
+			},
+		},
+		{
+			"world",
+			1,
+			[][]byte{
+				[]byte("second file"),
+			},
+		},
+		{
+			"hello",
+			3,
+			[][]byte{
+				nil,
+				[]byte("this is a test"),
+				[]byte("foo"),
+			},
+		},
+		{
+			"hello",
+			4,
+			[][]byte{
+				nil,
+				nil,
+				[]byte("foo"),
+				[]byte("bar"),
+			},
+		},
+	}
 
 	// --- revision 1 ---
 
-	rev, err := store.Put("hello", bytes.NewBuffer([]byte("hello world")))
-	if err != nil {
-		t.Fatalf("failed to put hello rev 1: %s", err)
-	}
-	if rev != 1 {
-		t.Fatalf("first revision should be 1 but got %d", rev)
-	}
+	for _, tt := range tests {
+		rev, err := store.Put(tt.Key, bytes.NewBuffer(tt.Data[len(tt.Data)-1]))
+		if err != nil {
+			t.Fatalf("%s#%d: failed to publish: %s", tt.Key, tt.Revision, err)
+		}
+		if rev != tt.Revision {
+			t.Fatalf("%s#%d: revision should be %d but got %d", tt.Key, tt.Revision, tt.Revision, rev)
+		}
 
-	rev, err = store.Latest("hello")
-	if err != nil {
-		t.Fatalf("failed to get revision of hello: %s", err)
-	}
-	if rev != 1 {
-		t.Fatalf("revision of hello should be 1 but got %d", rev)
-	}
+		rev, err = store.Latest(tt.Key)
+		if err != nil {
+			t.Fatalf("%s#%d: failed to get revision: %s", tt.Key, tt.Revision, err)
+		}
+		if rev != tt.Revision {
+			t.Fatalf("%s#%d: revision should be %d but got %d", tt.Key, tt.Revision, tt.Revision, rev)
+		}
 
-	buf := &bytes.Buffer{}
-	err = store.Get(buf, "hello", 1)
-	if err != nil {
-		t.Fatalf("failed to get hello rev 1: %s", err)
-	}
-	if buf.String() != "hello world" {
-		t.Fatalf("unexpected body: %q", buf)
-	}
+		time.Sleep(10 * time.Millisecond) // Wait for goroutine to remove old revisions.
 
-	// --- revision 2 ---
+		for i, data := range tt.Data {
+			buf := &bytes.Buffer{}
+			err = store.Get(buf, tt.Key, i+1)
 
-	rev, err = store.Put("hello", bytes.NewBuffer([]byte("this is a test")))
-	if err != nil {
-		t.Fatalf("failed to put hello rev 2: %s", err)
-	}
-	if rev != 2 {
-		t.Fatalf("second revision should be 2 but got %d", rev)
-	}
-
-	rev, err = store.Latest("hello")
-	if err != nil {
-		t.Fatalf("failed to get revision of hello: %s", err)
-	}
-	if rev != 2 {
-		t.Fatalf("revision of hello should be 2 but got %d", rev)
-	}
-
-	buf.Reset()
-	err = store.Get(buf, "hello", 2)
-	if err != nil {
-		t.Fatalf("failed to get hello rev 2: %s", err)
-	}
-	if buf.String() != "this is a test" {
-		t.Fatalf("unexpected body: %q", buf)
-	}
-
-	buf.Reset()
-	err = store.Get(buf, "hello", 1)
-	if err != nil {
-		t.Fatalf("failed to get hello rev 1: %s", err)
-	}
-	if buf.String() != "hello world" {
-		t.Fatalf("unexpected body: %q", buf)
+			if data == nil {
+				if err != ErrRevisionDeleted {
+					t.Fatalf("%s#%d: revision %d should be removed: error=%s", tt.Key, tt.Revision, i+1, err)
+				}
+			} else {
+				if err != nil {
+					t.Fatalf("%s#%d: failed to get revision %d: %s", tt.Key, tt.Revision, i+1, err)
+				}
+				if !bytes.Equal(buf.Bytes(), data) {
+					t.Fatalf("%s#%d: unexpected body of revision %d: %q", tt.Key, tt.Revision, i+1, buf)
+				}
+			}
+		}
 	}
 }

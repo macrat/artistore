@@ -165,11 +165,18 @@ func (s Server) Get(key string, w http.ResponseWriter, r *http.Request) {
 
 		w.Header().Set("Content-Length", strconv.Itoa(meta.Size))
 		w.Header().Set("Etag", meta.Hash)
+		w.Header().Set("Last-Modified", meta.Timestamp.UTC().Format("Mon, 02 Jan 2006 15:04:05 GMT"))
 		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 
 		if hash := r.Header.Get("If-None-Match"); hash == meta.Hash {
 			w.WriteHeader(http.StatusNotModified)
 			return
+		} else if since := r.Header.Get("If-Modified-Since"); hash == "" && since != "" {
+			t, err := http.ParseTime(since)
+			if err == nil && meta.Timestamp.After(t) {
+				w.WriteHeader(http.StatusNotModified)
+				return
+			}
 		}
 
 		if _, ok := w.(HeadWriter); ok {

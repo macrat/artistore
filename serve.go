@@ -87,6 +87,22 @@ func (s Server) pathTo(key string, revision int) string {
 	return "/" + key + "?rev=" + strconv.Itoa(revision)
 }
 
+type HeadWriter struct {
+	w http.ResponseWriter
+}
+
+func (w HeadWriter) Header() http.Header {
+	return w.w.Header()
+}
+
+func (w HeadWriter) Write(p []byte) (int, error) {
+	return len(p), nil
+}
+
+func (w HeadWriter) WriteHeader(code int) {
+	w.w.WriteHeader(code)
+}
+
 func (s Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	PrintLog(r.Method, "%s %s", r.RequestURI, r.RemoteAddr)
 
@@ -95,6 +111,8 @@ func (s Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.Get(w, r)
 	case "POST":
 		s.Post(w, r)
+	case "HEAD":
+		s.Get(HeadWriter{w}, r)
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		fmt.Fprintln(w, "Method not allowed.")
@@ -146,6 +164,10 @@ func (s Server) Get(w http.ResponseWriter, r *http.Request) {
 
 		if hash := r.Header.Get("If-None-Match"); hash == meta.Hash {
 			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+
+		if _, ok := w.(HeadWriter); ok {
 			return
 		}
 

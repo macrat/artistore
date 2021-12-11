@@ -125,11 +125,10 @@ func (f LocalFileReader) Read(p []byte) (int, error) {
 func (s LocalStore) Metadata(key string, revision int) (Metadata, error) {
 	f, err := s.open(key, revision)
 	if errors.Is(err, os.ErrNotExist) {
-		if latest, err := s.Latest(key); err != nil {
-			return Metadata{}, ErrNoSuchArtifact
-		} else if revision < latest {
+		if latest, err := s.Latest(key); err == nil && revision < latest {
 			return Metadata{}, ErrRevisionDeleted
 		}
+		return Metadata{}, ErrNoSuchArtifact
 	} else if err != nil {
 		return Metadata{}, nil
 	}

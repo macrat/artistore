@@ -1,7 +1,6 @@
 package main
 
 import (
-	"log"
 	"compress/gzip"
 	"encoding/json"
 	"errors"
@@ -28,7 +27,7 @@ type Metadata struct {
 }
 
 type RetainPolicy struct {
-	Num int
+	Num    int
 	Period time.Duration
 }
 
@@ -265,9 +264,9 @@ func (s LocalStore) sweepByNum(key string, latest int) {
 		if rev <= latest-s.Retain.Num {
 			err = os.Remove(filepath.Join(dirname, x.Name()))
 			if err != nil {
-				log.Printf("failed to sweep old revision %s#%d: %s", key, rev, err)
+				PrintErr("ERROR", "failed to sweep old revision %s#%d: %s", key, rev, err)
 			} else {
-				log.Printf("SWEEP /%s?rev=%d", key, rev)
+				PrintImportant("SWEEP", "%s#%d", key, rev)
 			}
 		}
 	}
@@ -313,9 +312,9 @@ func (s LocalStore) sweepByTime(key string) {
 		if meta.Timestamp.Add(s.Retain.Period).Before(time.Now()) {
 			err = os.Remove(filepath.Join(dirname, x.Name()))
 			if err != nil {
-				log.Printf("failed to sweep old revision %s#%d: %s", key, rev, err)
+				PrintErr("ERROR", "failed to sweep old revision %s#%d: %s", key, rev, err)
 			} else {
-				log.Printf("SWEEP /%s?rev=%d", key, rev)
+				PrintImportant("SWEEP", "%s#%d", key, rev)
 			}
 		}
 	}

@@ -2,12 +2,11 @@ package main
 
 import (
 	"fmt"
-	"time"
-	"log"
 	"net/http"
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/NYTimes/gziphandler"
 	"github.com/spf13/cobra"
@@ -38,9 +37,9 @@ var serveCmd = &cobra.Command{
 			},
 		}
 
-		log.Print("Starting Artistore on ", viper.GetString("listen"))
+		PrintLog("INFO", "Starting Artistore on %s", viper.GetString("listen"))
 
-		s.StartSweeper(5*time.Minute)
+		s.StartSweeper(5 * time.Minute)
 		http.ListenAndServe(viper.GetString("listen"), gziphandler.GzipHandler(s))
 	},
 }
@@ -74,7 +73,7 @@ func (s Server) StartSweeper(interval time.Duration) {
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 
-		for  {
+		for {
 			select {
 			case <-ticker.C:
 				go s.Store.Sweep()
@@ -88,7 +87,8 @@ func (s Server) pathTo(key string, revision int) string {
 }
 
 func (s Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	log.Printf("%s %s", r.Method, r.URL)
+	PrintLog(r.Method, "%s %s", r.RequestURI, r.RemoteAddr)
+
 	switch r.Method {
 	case "GET":
 		s.Get(w, r)
@@ -116,7 +116,7 @@ func (s Server) Get(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprintln(w, err)
 			return
 		} else if err != nil {
-			log.Print(err)
+			PrintErr("ERROR", "%s", err)
 			w.WriteHeader(http.StatusInternalServerError)
 			fmt.Fprintln(w, InternalServerErrorMessage)
 			return
@@ -126,7 +126,7 @@ func (s Server) Get(w http.ResponseWriter, r *http.Request) {
 
 		err = s.Store.Get(w, key, rev)
 		if err != nil {
-			log.Print(err)
+			PrintErr("ERROR", "%s", err)
 			w.WriteHeader(http.StatusInternalServerError)
 			fmt.Fprintln(w, InternalServerErrorMessage)
 		}
@@ -136,7 +136,7 @@ func (s Server) Get(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusNotFound)
 			fmt.Fprintln(w, err)
 		} else if err != nil {
-			log.Print(err)
+			PrintErr("ERROR", "%s", err)
 			w.WriteHeader(http.StatusInternalServerError)
 			fmt.Fprintln(w, InternalServerErrorMessage)
 		} else {
@@ -168,6 +168,7 @@ func (s Server) Post(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintln(w, "Authorization type should be bearer.")
 		return
 	} else if token, err := ParseToken(strings.TrimSpace(auth[len("bearer "):])); err != nil || !IsCorrentToken(s.Secret, token, key) {
+		PrintWarn("FORBIDDEN", "%s %s", key, r.RemoteAddr)
 		w.WriteHeader(http.StatusForbidden)
 		fmt.Fprintln(w, "Invalid authorization token.")
 		return
@@ -175,11 +176,13 @@ func (s Server) Post(w http.ResponseWriter, r *http.Request) {
 
 	rev, err := s.Store.Put(key, r.Body)
 	if err != nil {
-		log.Print(err)
+		PrintErr("ERROR", "%s", err)
 		w.WriteHeader(http.StatusInternalServerError)
 		fmt.Fprintln(w, InternalServerErrorMessage)
 		return
 	}
+
+	PrintImportant("PUBLISH", "%s#%d", key, rev)
 
 	fmt.Fprintln(w, "http://"+r.Host+s.pathTo(key, rev))
 }

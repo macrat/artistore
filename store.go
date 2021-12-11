@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"mime"
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"strconv"
 	"time"
@@ -196,14 +198,21 @@ func (f LocalFileWriter) Write(p []byte) (int, error) {
 	return f.z.Write(p)
 }
 
-func detectContentType(data []byte) string {
-	typ := http.DetectContentType(data)
+func detectContentType(key string, data []byte) string {
+	typ := mime.TypeByExtension(path.Ext(key))
+	if typ != "" {
+		return typ
+	}
+
+	typ = http.DetectContentType(data)
 	if typ != "application/octet-stream" {
 		return typ
 	}
+
 	if utf8.Valid(data) {
 		return "text/plain; charset=utf-8"
 	}
+
 	return typ
 }
 
@@ -217,7 +226,7 @@ func (s LocalStore) Put(key string, r io.Reader) (revision int, err error) {
 	f, revision, err := s.create(key, Metadata{
 		Key:      key,
 		Revision: revision,
-		Type:     detectContentType(head[:n]),
+		Type:     detectContentType(key, head[:n]),
 	})
 	if err != nil {
 		return 0, err

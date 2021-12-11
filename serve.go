@@ -106,25 +106,28 @@ func (w HeadWriter) WriteHeader(code int) {
 func (s Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	PrintLog(r.Method, "%s %s", r.RequestURI, r.RemoteAddr)
 
+	key := strings.TrimLeft(r.URL.Path, "/")
+	if key == "" {
+		w.WriteHeader(http.StatusNotFound)
+		fmt.Fprintln(w, "Please specify the key of artifact.")
+		return
+	}
+
 	switch r.Method {
 	case "GET":
-		s.Get(w, r)
+		s.Get(key, w, r)
 	case "POST":
-		s.Post(w, r)
+		s.Post(key, w, r)
 	case "HEAD":
-		s.Get(HeadWriter{w}, r)
+		s.Get(key, HeadWriter{w}, r)
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		fmt.Fprintln(w, "Method not allowed.")
 	}
 }
 
-func (s Server) Get(w http.ResponseWriter, r *http.Request) {
-	key := strings.TrimLeft(r.URL.Path, "/")
-	if key == "" {
-		w.WriteHeader(http.StatusNotFound)
-		fmt.Fprintln(w, "Please specify the key of artifact.")
-	} else if r.URL.Query().Has("rev") {
+func (s Server) Get(key string, w http.ResponseWriter, r *http.Request) {
+	if r.URL.Query().Has("rev") {
 		rev, err := strconv.Atoi(r.URL.Query().Get("rev"))
 		if err != nil || rev < 0 {
 			w.WriteHeader(http.StatusBadRequest)
@@ -194,15 +197,8 @@ func (s Server) Get(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s Server) Post(w http.ResponseWriter, r *http.Request) {
+func (s Server) Post(key string, w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
-
-	key := strings.TrimLeft(r.URL.Path, "/")
-	if key == "" {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		fmt.Fprintln(w, "Method not allowed.")
-		return
-	}
 
 	auth := r.Header.Get("Authorization")
 	if auth == "" {

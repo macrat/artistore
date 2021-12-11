@@ -47,7 +47,7 @@ var publishCmd = &cobra.Command{
 				os.Exit(1)
 			}
 		} else {
-			fmt.Fprintln(os.Stderr, "Either secret or token is required.\nPlease set at least one of --token flag (recommended), --secret flag, or ARTISTORE_SECRET environment variable.")
+			fmt.Fprintln(os.Stderr, "Either secret or token is required.\nPlease set at least one of --token flag, ARTISTORE_TOKEN environment variable (recommended), --secret flag, or ARTISTORE_SECRET environment variable.")
 			os.Exit(2)
 		}
 

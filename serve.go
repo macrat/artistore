@@ -106,7 +106,14 @@ func (s Server) Get(w http.ResponseWriter, r *http.Request) {
 	if key == "" {
 		w.WriteHeader(http.StatusNotFound)
 		fmt.Fprintln(w, "Please specify the key of artifact.")
-	} else if rev, err := strconv.Atoi(r.URL.Query().Get("rev")); err == nil && rev > 0 {
+	} else if r.URL.Query().Has("rev") {
+		rev, err := strconv.Atoi(r.URL.Query().Get("rev"))
+		if err != nil || rev < 0 {
+			w.WriteHeader(http.StatusBadRequest)
+			fmt.Fprintln(w, "Invalid revision.")
+			return
+		}
+
 		meta, err := s.Store.Metadata(key, rev)
 		if err == ErrNoSuchArtifact {
 			w.WriteHeader(http.StatusNotFound)
@@ -148,7 +155,7 @@ func (s Server) Get(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprintln(w, InternalServerErrorMessage)
 		}
 	} else {
-		rev, err = s.Store.Latest(key)
+		rev, err := s.Store.Latest(key)
 		if err == ErrNoSuchArtifact {
 			w.WriteHeader(http.StatusNotFound)
 			fmt.Fprintln(w, err)

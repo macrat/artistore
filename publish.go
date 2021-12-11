@@ -114,7 +114,7 @@ func Publish(u *url.URL, token Token, data io.Reader) (messages string, err erro
 		return "", err
 	}
 
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode != http.StatusCreated {
 		return "", errors.New(string(body))
 	}
 	return string(body), nil

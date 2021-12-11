@@ -235,6 +235,8 @@ func (s Server) Post(key string, w http.ResponseWriter, r *http.Request) {
 
 	PrintImportant("PUBLISH", "%s#%d", key, rev)
 
+	w.Header().Set("Location", s.pathTo(key, rev))
+	w.WriteHeader(http.StatusCreated)
 	fmt.Fprintln(w, "http://"+r.Host+s.pathTo(key, rev))
 }
 

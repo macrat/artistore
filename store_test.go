@@ -7,7 +7,7 @@ import (
 )
 
 func TestLocalStore(t *testing.T) {
-	store := LocalStore{t.TempDir(), RetainPolicy{2}}
+	store := LocalStore{t.TempDir(), RetainPolicy{2, 0}}
 
 	tests := []struct {
 		Key      string

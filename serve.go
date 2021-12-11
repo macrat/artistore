@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"time"
 	"log"
 	"net/http"
 	"os"
@@ -33,10 +34,13 @@ var serveCmd = &cobra.Command{
 			Secret: sec,
 			Store: LocalStore{
 				viper.GetString("store"),
-				RetainPolicy{viper.GetInt("retain-num")},
+				RetainPolicy{viper.GetInt("retain-num"), viper.GetDuration("retain-period")},
 			},
 		}
+
 		log.Print("Starting Artistore on ", viper.GetString("listen"))
+
+		s.StartSweeper(5*time.Minute)
 		http.ListenAndServe(viper.GetString("listen"), gziphandler.GzipHandler(s))
 	},
 }
@@ -53,13 +57,30 @@ func init() {
 	serveCmd.Flags().String("store", "/var/lib/artistore", "Path to data directory.")
 	viper.BindPFlag("store", serveCmd.Flags().Lookup("store"))
 
-	serveCmd.Flags().Int("retain-num", 0, "Number of to retain revisions. (default retain all)")
+	serveCmd.Flags().Int("retain-num", 0, "Number of to retain old revisions. (default retain all)")
 	viper.BindPFlag("retain-num", serveCmd.Flags().Lookup("retain-num"))
+
+	serveCmd.Flags().Duration("retain-period", 0, "Period of to retain old revisions. (default retain forever)")
+	viper.BindPFlag("retain-period", serveCmd.Flags().Lookup("retain-period"))
 }
 
 type Server struct {
 	Secret Secret
 	Store  Store
+}
+
+func (s Server) StartSweeper(interval time.Duration) {
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+
+		for  {
+			select {
+			case <-ticker.C:
+				go s.Store.Sweep()
+			}
+		}
+	}()
 }
 
 func (s Server) pathTo(key string, revision int) string {

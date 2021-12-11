@@ -1,6 +1,7 @@
 package main
 
 import (
+	"log"
 	"compress/gzip"
 	"encoding/json"
 	"errors"
@@ -20,13 +21,15 @@ var (
 )
 
 type Metadata struct {
-	Key      string `json:"key"`
-	Revision int    `json:"revision"`
-	Type     string `json:"type"`
+	Key       string    `json:"key"`
+	Revision  int       `json:"revision"`
+	Type      string    `json:"type"`
+	Timestamp time.Time `json:"-"`
 }
 
 type RetainPolicy struct {
 	Num int
+	Period time.Duration
 }
 
 type Store interface {
@@ -34,6 +37,7 @@ type Store interface {
 	Metadata(key string, revision int) (Metadata, error)
 	Get(w io.Writer, key string, revision int) error
 	Put(key string, r io.Reader) (revision int, err error)
+	Sweep()
 }
 
 type LocalStore struct {
@@ -109,6 +113,8 @@ func (f LocalFileReader) Metadata() (Metadata, error) {
 	if err := json.Unmarshal(f.z.Extra, &meta); err != nil {
 		return Metadata{}, err
 	}
+
+	meta.Timestamp = f.z.ModTime
 
 	return meta, nil
 }
@@ -229,12 +235,12 @@ func (s LocalStore) Put(key string, r io.Reader) (revision int, err error) {
 		return 0, err
 	}
 
-	go s.sweep(key, revision)
+	go s.sweepByNum(key, revision)
 
 	return revision, nil
 }
 
-func (s LocalStore) sweep(key string, latest int) {
+func (s LocalStore) sweepByNum(key string, latest int) {
 	if s.Retain.Num <= 0 {
 		return
 	}
@@ -252,12 +258,82 @@ func (s LocalStore) sweep(key string, latest int) {
 	}
 
 	for _, x := range xs {
-		i, err := strconv.Atoi(x.Name())
+		rev, err := strconv.Atoi(x.Name())
 		if err != nil {
 			continue
 		}
-		if i <= latest-s.Retain.Num {
-			os.Remove(filepath.Join(dirname, x.Name()))
+		if rev <= latest-s.Retain.Num {
+			err = os.Remove(filepath.Join(dirname, x.Name()))
+			if err != nil {
+				log.Printf("failed to sweep old revision %s#%d: %s", key, rev, err)
+			} else {
+				log.Printf("SWEEP /%s?rev=%d", key, rev)
+			}
 		}
+	}
+}
+
+func (s LocalStore) sweepByTime(key string) {
+	if s.Retain.Period == 0 {
+		return
+	}
+
+	dirname := filepath.Join(s.Path, s.escape(key))
+	dir, err := os.Open(dirname)
+	if err != nil {
+		return
+	}
+	defer dir.Close()
+
+	xs, err := dir.ReadDir(0)
+	if err != nil {
+		return
+	}
+
+	latest, err := s.Latest(key)
+	if err != nil {
+		return
+	}
+
+	for _, x := range xs {
+		rev, err := strconv.Atoi(x.Name())
+		if err != nil {
+			continue
+		}
+
+		if rev == latest {
+			continue
+		}
+
+		meta, err := s.Metadata(key, rev)
+		if err != nil {
+			continue
+		}
+
+		if meta.Timestamp.Add(s.Retain.Period).Before(time.Now()) {
+			err = os.Remove(filepath.Join(dirname, x.Name()))
+			if err != nil {
+				log.Printf("failed to sweep old revision %s#%d: %s", key, rev, err)
+			} else {
+				log.Printf("SWEEP /%s?rev=%d", key, rev)
+			}
+		}
+	}
+}
+
+func (s LocalStore) Sweep() {
+	dir, err := os.Open(s.Path)
+	if err != nil {
+		return
+	}
+	defer dir.Close()
+
+	xs, err := dir.ReadDir(0)
+	if err != nil {
+		return
+	}
+
+	for _, x := range xs {
+		s.sweepByTime(s.unescape(x.Name()))
 	}
 }

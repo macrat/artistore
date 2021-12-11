@@ -120,6 +120,8 @@ func (s Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.Post(key, w, r)
 	case "HEAD":
 		s.Get(key, HeadWriter{w}, r)
+	case "OPTIONS":
+		s.Options(key, w, r)
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		fmt.Fprintln(w, "Method not allowed.")
@@ -227,4 +229,12 @@ func (s Server) Post(key string, w http.ResponseWriter, r *http.Request) {
 	PrintImportant("PUBLISH", "%s#%d", key, rev)
 
 	fmt.Fprintln(w, "http://"+r.Host+s.pathTo(key, rev))
+}
+
+func (s Server) Options(key string, w http.ResponseWriter, r *http.Request) {
+	if r.URL.Query().Has("rev") {
+		w.Header().Set("Allow", "GET, HEAD, OPTIONS")
+	} else {
+		w.Header().Set("Allow", "GET, POST, HEAD, OPTIONS")
+	}
 }

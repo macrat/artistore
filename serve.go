@@ -106,6 +106,8 @@ func (w HeadWriter) WriteHeader(code int) {
 func (s Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	PrintLog(r.Method, "%s %s", r.RequestURI, r.RemoteAddr)
 
+	w.Header().Set("Server", "Artistore")
+
 	key := strings.TrimLeft(r.URL.Path, "/")
 	if key == "" {
 		w.WriteHeader(http.StatusNotFound)

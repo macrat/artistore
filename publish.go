@@ -8,7 +8,10 @@ import (
 	"os"
 	"path"
 	"strings"
+	"sync"
+	"sync/atomic"
 
+	"github.com/gosuri/uiprogress"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -95,7 +98,21 @@ func (h TokenHandler) TokenFor(key string) (Token, error) {
 	return NewToken(h.Secret, key)
 }
 
-func PublishArtifact(token Token, key string) (location string, err error) {
+type ProgressRecorder struct {
+	Current  int64
+	Total    int64
+	Upstream io.Reader
+	Report   func(current, total int64)
+}
+
+func (r *ProgressRecorder) Read(p []byte) (n int, err error) {
+	n, err = r.Upstream.Read(p)
+	r.Current += int64(n)
+	r.Report(r.Current, r.Total)
+	return
+}
+
+func PublishArtifact(token Token, key string, progress func(current, total int64)) (location string, err error) {
 	u, err := GetURL(key)
 	if err != nil {
 		return "", err
@@ -107,7 +124,15 @@ func PublishArtifact(token Token, key string) (location string, err error) {
 	}
 	defer f.Close()
 
-	req, err := http.NewRequest("POST", u.String(), f)
+	r := &ProgressRecorder{Upstream: f, Report: progress}
+
+	stat, err := f.Stat()
+	if err != nil {
+		return "", err
+	}
+	r.Total = stat.Size()
+
+	req, err := http.NewRequest("POST", u.String(), r)
 	if err != nil {
 		return "", err
 	}
@@ -130,30 +155,55 @@ func PublishArtifact(token Token, key string) (location string, err error) {
 		return "", errors.New(string(body))
 	}
 
+	progress(stat.Size(), stat.Size())
 	return strings.TrimSpace(string(body)), nil
 }
 
 func PublishAll(t TokenHandler, keys []string) (ok bool) {
-	ok = true
+	uiprogress.Start()
+	defer uiprogress.Stop()
 
+	okStore := atomic.Value{}
+	okStore.Store(true)
+
+	var wg sync.WaitGroup
 	for _, key := range keys {
-		fmt.Print(key)
-		os.Stdout.Sync()
+		wg.Add(1)
 
-		token, err := t.TokenFor(key)
-		if err != nil {
-			fmt.Println(" -> error:", err)
-			ok = false
-			return
-		}
-		location, err := PublishArtifact(token, key)
-		if err != nil {
-			fmt.Println(" -> error:", err)
-			ok = false
-			return
-		}
-		fmt.Println(" ->", location)
+		key := key
+		msg := ""
+		bar := uiprogress.AddBar(100).PrependFunc(func(b *uiprogress.Bar) string {
+			return fmt.Sprintf("%20s", key)
+		}).AppendFunc(func(b *uiprogress.Bar) string {
+			if msg != "" {
+				return msg
+			} else {
+				return fmt.Sprintf("%d%%", b.Current())
+			}
+		})
+		bar.Width = 20
+
+		go func() {
+			defer wg.Done()
+
+			token, err := t.TokenFor(key)
+			if err != nil {
+				msg = "error: " + err.Error()
+				okStore.CompareAndSwap(true, false)
+				return
+			}
+			msg, err = PublishArtifact(token, key, func(current, total int64) {
+				bar.Set(int(current * 100 / total))
+			})
+			if err != nil {
+				msg = "error: " + err.Error()
+				okStore.CompareAndSwap(true, false)
+				return
+			}
+		}()
 	}
 
-	return ok
+	wg.Wait()
+
+	return okStore.Load().(bool)
 }

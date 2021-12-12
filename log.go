@@ -2,18 +2,23 @@ package main
 
 import (
 	"io"
+	"sync"
 	"time"
 
 	"github.com/fatih/color"
 )
 
 var (
+	LogLock    = &sync.Mutex{}
 	LogStream  = color.Output
 	ErrStream  = color.Error
 	TimeFormat = "2006/01/02 15:04:05"
 )
 
 func printLog(stream io.Writer, fg, bg color.Attribute, what, format string, args ...interface{}) {
+	LogLock.Lock()
+	defer LogLock.Unlock()
+
 	color.New(fg).Fprint(stream, time.Now().Format(TimeFormat))
 	stream.Write([]byte(" "))
 	color.New(bg).Fprint(stream, what)

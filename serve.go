@@ -161,6 +161,7 @@ func (s Server) Get(key string, w http.ResponseWriter, r *http.Request) {
 			PrintErr("ERROR", "%s", err)
 			w.WriteHeader(http.StatusInternalServerError)
 			fmt.Fprintln(w, InternalServerErrorMessage)
+			return
 		}
 		defer f.Close()
 

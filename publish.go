@@ -21,7 +21,7 @@ var publishCmd = &cobra.Command{
 	Short: "Publish an artifact to Artistore",
 	Long:  "Publish an artifact to Artistore.",
 	Example: `  $ artistore publish library.js
-  $ artistore publish library/*`,
+  $ artistore publish build/* --prefix=library/`,
 	Args: cobra.MinimumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		t, err := NewTokenHandler()
@@ -30,11 +30,13 @@ var publishCmd = &cobra.Command{
 			os.Exit(2)
 		}
 
+		prefix := viper.GetString("prefix")
+
 		var keys []string
 		for _, key := range args {
 			key = path.Clean(key)
 
-			if err := VerifyKey(key); err != nil {
+			if err := VerifyKey(path.Join(prefix, key)); err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				os.Exit(2)
 			}
@@ -50,7 +52,7 @@ var publishCmd = &cobra.Command{
 			keys = append(keys, key)
 		}
 
-		if ok := PublishAll(t, keys); !ok {
+		if ok := PublishAll(t, prefix, keys); !ok {
 			os.Exit(1)
 		}
 	},
@@ -67,6 +69,9 @@ func init() {
 
 	publishCmd.Flags().String("token", "", "Client token. See also 'artistore help token'.")
 	viper.BindPFlag("token", publishCmd.Flags().Lookup("token"))
+
+	publishCmd.Flags().String("prefix", "", "Prefix for key.")
+	viper.BindPFlag("prefix", publishCmd.Flags().Lookup("prefix"))
 }
 
 type TokenHandler struct {
@@ -112,8 +117,8 @@ func (r *ProgressRecorder) Read(p []byte) (n int, err error) {
 	return
 }
 
-func PublishArtifact(token Token, key string, progress func(current, total int64)) (location string, err error) {
-	u, err := GetURL(key)
+func PublishArtifact(token Token, prefix, key string, progress func(current, total int64)) (location string, err error) {
+	u, err := GetURL(path.Join(prefix, key))
 	if err != nil {
 		return "", err
 	}
@@ -159,7 +164,7 @@ func PublishArtifact(token Token, key string, progress func(current, total int64
 	return strings.TrimSpace(string(body)), nil
 }
 
-func PublishAll(t TokenHandler, keys []string) (ok bool) {
+func PublishAll(t TokenHandler, prefix string, keys []string) (ok bool) {
 	uiprogress.Start()
 	defer uiprogress.Stop()
 
@@ -186,17 +191,17 @@ func PublishAll(t TokenHandler, keys []string) (ok bool) {
 		go func() {
 			defer wg.Done()
 
-			token, err := t.TokenFor(key)
+			token, err := t.TokenFor(path.Join(prefix, key))
 			if err != nil {
-				msg = "error: " + err.Error()
+				msg = "error: " + strings.TrimSpace(err.Error())
 				okStore.CompareAndSwap(true, false)
 				return
 			}
-			msg, err = PublishArtifact(token, key, func(current, total int64) {
+			msg, err = PublishArtifact(token, prefix, key, func(current, total int64) {
 				bar.Set(int(current * 100 / total))
 			})
 			if err != nil {
-				msg = "error: " + err.Error()
+				msg = "error: " + strings.TrimSpace(err.Error())
 				okStore.CompareAndSwap(true, false)
 				return
 			}

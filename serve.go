@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -17,9 +16,6 @@ import (
 
 var (
 	InternalServerErrorMessage = "Internal server error.\nPlease check server log if you are server administrator."
-
-	ErrInvalidRangeType = errors.New("Unsupported range length type. Please use bytes.")
-	ErrInvalidRange     = errors.New("Requested range is not satisfiable.")
 )
 
 var serveCmd = &cobra.Command{
@@ -134,74 +130,6 @@ func (s Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-type RangeRequest struct {
-	From   int64
-	To     int64
-	Suffix int64
-	Total  int64
-}
-
-func parseRangeRequest(header string) (req RangeRequest, err error) {
-	if header == "" {
-		return
-	}
-	if !strings.HasPrefix(header, "bytes=") {
-		err = ErrInvalidRangeType
-		return
-	}
-	header = strings.TrimSpace(header[len("bytes="):])
-	header = strings.TrimSpace(strings.SplitN(header, ",", 2)[0])
-	xs := strings.SplitN(header, "-", 2)
-
-	if xs[0] != "" {
-		req.From, err = strconv.ParseInt(xs[0], 10, 64)
-		if err != nil {
-			return
-		}
-		if xs[1] != "" {
-			req.To, err = strconv.ParseInt(xs[1], 10, 64)
-			if err != nil {
-				return
-			}
-			req.To++
-		}
-	} else if xs[1] != "" {
-		req.Suffix, err = strconv.ParseInt(xs[1], 10, 64)
-		if err != nil {
-			return
-		}
-	}
-
-	if req.From < 0 || (req.To != 0 && req.To <= req.From) {
-		err = ErrInvalidRange
-	}
-
-	return
-}
-
-func (req RangeRequest) String() string {
-	to := req.To
-	if to == 0 {
-		to = req.Total
-	}
-	return fmt.Sprintf("bytes %d-%d/%d", req.From, to-1, req.Total)
-}
-
-func (req RangeRequest) Requested() bool {
-	return req.From != 0 || req.To != 0 || req.Suffix != 0
-}
-
-func (req RangeRequest) Size() int64 {
-	if req.Suffix > 0 {
-		return req.Suffix
-	}
-	if req.To == 0 {
-		return req.Total - req.From
-	} else {
-		return req.To - req.From
-	}
-}
-
 func (s Server) Get(key string, w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Has("rev") {
 		rev, err := strconv.Atoi(r.URL.Query().Get("rev"))
@@ -227,51 +155,20 @@ func (s Server) Get(key string, w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		rangeRequest, err := parseRangeRequest(r.Header.Get("Range"))
-		if err == ErrInvalidRangeType {
-			w.WriteHeader(http.StatusBadRequest)
-			fmt.Fprintln(w, err)
-			return
-		} else if err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			fmt.Fprintln(w, "Invalid range request.")
-			return
-		}
+		w.Header().Set("Content-Type", meta.Type)
 
-		f, meta, err := s.Store.Get(key, rev, rangeRequest)
-		if err == ErrInvalidRangeType {
-			w.WriteHeader(http.StatusRequestedRangeNotSatisfiable)
-			fmt.Fprintln(w, err)
-			return
-		} else if err != nil {
+		f, meta, err := s.Store.Get(key, rev)
+		if err != nil {
 			PrintErr("ERROR", "%s", err)
 			w.WriteHeader(http.StatusInternalServerError)
 			fmt.Fprintln(w, InternalServerErrorMessage)
-			return
 		}
 		defer f.Close()
 
-		if hash := r.Header.Get("If-Range"); hash != "" {
-			mod, err := http.ParseTime(hash)
-			if (err == nil && meta.Timestamp.After(mod)) || (err != nil && meta.Hash != hash) {
-				rangeRequest = RangeRequest{}
-			}
-		}
-
-		rangeRequest.Total = meta.Size
-
-		w.Header().Set("Content-Type", meta.Type)
+		w.Header().Set("Content-Length", strconv.Itoa(meta.Size))
 		w.Header().Set("Etag", meta.Hash)
 		w.Header().Set("Last-Modified", meta.Timestamp.UTC().Format("Mon, 02 Jan 2006 15:04:05 GMT"))
 		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-
-		if rangeRequest.Requested() {
-			w.Header().Set("Content-Length", strconv.FormatInt(rangeRequest.Size(), 10))
-			w.Header().Set("Content-Range", rangeRequest.String())
-		} else {
-			w.Header().Set("Content-Length", strconv.FormatInt(meta.Size, 10))
-		}
-		w.Header().Set("Accept-Ranges", "bytes")
 
 		if hash := r.Header.Get("If-None-Match"); hash == meta.Hash {
 			w.WriteHeader(http.StatusNotModified)
@@ -288,13 +185,7 @@ func (s Server) Get(key string, w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		if rangeRequest.Requested() {
-			w.WriteHeader(http.StatusPartialContent)
-			_, err = io.CopyN(w, f, rangeRequest.Size())
-		} else {
-			_, err = io.Copy(w, f)
-		}
-		if err != nil {
+		if _, err = io.Copy(w, f); err != nil {
 			PrintErr("ERROR", "%s", err)
 			w.WriteHeader(http.StatusInternalServerError)
 			fmt.Fprintln(w, InternalServerErrorMessage)
@@ -311,7 +202,7 @@ func (s Server) Get(key string, w http.ResponseWriter, r *http.Request) {
 		} else {
 			path := s.pathTo(key, rev)
 			w.Header().Set("Location", path)
-			w.WriteHeader(http.StatusSeeOther)
+			w.WriteHeader(http.StatusFound)
 			fmt.Fprintln(w, "http://"+r.Host+path)
 		}
 	}

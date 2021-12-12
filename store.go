@@ -28,7 +28,7 @@ type Metadata struct {
 	Key       string    `json:"-"`
 	Revision  int       `json:"revision"`
 	Type      string    `json:"type"`
-	Size      int64     `json:"size"`
+	Size      int       `json:"size"`
 	Hash      string    `json:"md5"`
 	Timestamp time.Time `json:"-"`
 }
@@ -41,7 +41,7 @@ type RetainPolicy struct {
 type Store interface {
 	Latest(key string) (revision int, err error)
 	Metadata(key string, revision int) (Metadata, error)
-	Get(key string, revision int, req RangeRequest) (io.ReadCloser, Metadata, error)
+	Get(key string, revision int) (io.ReadCloser, Metadata, error)
 	Put(key string, r io.Reader) (revision int, err error)
 	Sweep()
 }
@@ -145,18 +145,7 @@ func (s LocalStore) Metadata(key string, revision int) (Metadata, error) {
 	return f.Metadata()
 }
 
-type nopWriter struct{}
-
-func (w nopWriter) Write(p []byte) (int, error) {
-	return len(p), nil
-}
-
-func consumeUntil(f io.Reader, pos int64) error {
-	_, err := io.CopyN(nopWriter{}, f, pos)
-	return err
-}
-
-func (s LocalStore) Get(key string, revision int, rangeRequest RangeRequest) (io.ReadCloser, Metadata, error) {
+func (s LocalStore) Get(key string, revision int) (io.ReadCloser, Metadata, error) {
 	f, err := s.open(key, revision)
 	if errors.Is(err, os.ErrNotExist) {
 		if latest, err := s.Latest(key); err != nil {
@@ -171,16 +160,6 @@ func (s LocalStore) Get(key string, revision int, rangeRequest RangeRequest) (io
 	meta, err := f.Metadata()
 	if err != nil {
 		return nil, Metadata{}, err
-	}
-
-	if rangeRequest.Requested() {
-		if meta.Size < rangeRequest.From+rangeRequest.Size() {
-			return nil, Metadata{}, ErrInvalidRange
-		}
-
-		if err = consumeUntil(f, rangeRequest.From); err != nil {
-			return nil, Metadata{}, err
-		}
 	}
 
 	return f, meta, err
@@ -403,7 +382,7 @@ func (s LocalStore) Sweep() {
 type TempFile struct {
 	file *os.File
 	hash hash.Hash
-	size int64
+	size int
 }
 
 func NewTempFile() (*TempFile, error) {
@@ -427,7 +406,7 @@ func (f *TempFile) Write(p []byte) (n int, err error) {
 	if err != nil {
 		return
 	}
-	f.size += int64(n)
+	f.size += n
 
 	_, err = f.hash.Write(p)
 	return
@@ -445,7 +424,7 @@ func (f *TempFile) CopyTo(w io.Writer) error {
 	return err
 }
 
-func (f *TempFile) Size() int64 {
+func (f *TempFile) Size() int {
 	return f.size
 }
 

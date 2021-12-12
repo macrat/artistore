@@ -41,7 +41,7 @@ type RetainPolicy struct {
 type Store interface {
 	Latest(key string) (revision int, err error)
 	Metadata(key string, revision int) (Metadata, error)
-	Get(key string, revision int) (io.ReadCloser, Metadata, error)
+	Get(key string, revision int) (io.ReadSeekCloser, Metadata, error)
 	Put(key string, r io.Reader) (revision int, err error)
 	Sweep()
 }
@@ -91,29 +91,30 @@ func (s LocalStore) Latest(key string) (revision int, err error) {
 }
 
 type LocalFileReader struct {
-	f *os.File
-	z *gzip.Reader
+	f   *os.File
+	z   *gzip.Reader
+	pos int64
 }
 
-func (s LocalStore) open(key string, revision int) (LocalFileReader, error) {
+func (s LocalStore) open(key string, revision int) (*LocalFileReader, error) {
 	f, err := os.Open(filepath.Join(s.Path, s.escape(key), strconv.Itoa(revision)))
 	if err != nil {
-		return LocalFileReader{}, err
+		return nil, err
 	}
 
 	z, err := gzip.NewReader(f)
 	if err != nil {
-		return LocalFileReader{}, err
+		return nil, err
 	}
 
-	return LocalFileReader{f, z}, nil
+	return &LocalFileReader{f, z, 0}, nil
 }
 
-func (f LocalFileReader) Close() error {
+func (f *LocalFileReader) Close() error {
 	return f.f.Close()
 }
 
-func (f LocalFileReader) Metadata() (Metadata, error) {
+func (f *LocalFileReader) Metadata() (Metadata, error) {
 	var meta Metadata
 
 	if err := json.Unmarshal(f.z.Extra, &meta); err != nil {
@@ -126,8 +127,42 @@ func (f LocalFileReader) Metadata() (Metadata, error) {
 	return meta, nil
 }
 
-func (f LocalFileReader) Read(p []byte) (int, error) {
-	return f.z.Read(p)
+func (f *LocalFileReader) Read(p []byte) (n int, err error) {
+	n, err = f.z.Read(p)
+	f.pos += int64(n)
+	return
+}
+
+type DummyWriter struct{}
+
+func (w DummyWriter) Write(p []byte) (int, error) {
+	return len(p), nil
+}
+
+func (f *LocalFileReader) Seek(offset int64, whence int) (int64, error) {
+	switch whence {
+	case io.SeekStart:
+		_, err := f.f.Seek(0, io.SeekStart)
+		if err != nil {
+			return 0, err
+		}
+		err = f.z.Reset(f.f)
+		if err != nil {
+			return 0, err
+		}
+		f.pos = 0
+		return io.CopyN(DummyWriter{}, f, offset)
+	case io.SeekCurrent:
+		return f.Seek(f.pos+offset, io.SeekStart)
+	case io.SeekEnd:
+		meta, err := f.Metadata()
+		if err != nil {
+			return 0, err
+		}
+		return f.Seek(int64(meta.Size)-offset, io.SeekStart)
+	}
+
+	return 0, nil
 }
 
 func (s LocalStore) Metadata(key string, revision int) (Metadata, error) {
@@ -145,7 +180,7 @@ func (s LocalStore) Metadata(key string, revision int) (Metadata, error) {
 	return f.Metadata()
 }
 
-func (s LocalStore) Get(key string, revision int) (io.ReadCloser, Metadata, error) {
+func (s LocalStore) Get(key string, revision int) (io.ReadSeekCloser, Metadata, error) {
 	f, err := s.open(key, revision)
 	if errors.Is(err, os.ErrNotExist) {
 		if latest, err := s.Latest(key); err != nil {

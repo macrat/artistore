@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"strconv"
@@ -165,31 +164,14 @@ func (s Server) Get(key string, w http.ResponseWriter, r *http.Request) {
 		}
 		defer f.Close()
 
-		w.Header().Set("Content-Length", strconv.Itoa(meta.Size))
-		w.Header().Set("Etag", meta.Hash)
-		w.Header().Set("Last-Modified", meta.Timestamp.UTC().Format("Mon, 02 Jan 2006 15:04:05 GMT"))
+		w.Header().Set("Etag", `"`+meta.Hash+`"`)
 		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-
-		if hash := r.Header.Get("If-None-Match"); hash == meta.Hash {
-			w.WriteHeader(http.StatusNotModified)
-			return
-		} else if since := r.Header.Get("If-Modified-Since"); hash == "" && since != "" {
-			t, err := http.ParseTime(since)
-			if err == nil && meta.Timestamp.After(t) {
-				w.WriteHeader(http.StatusNotModified)
-				return
-			}
-		}
 
 		if _, ok := w.(HeadWriter); ok {
 			return
 		}
 
-		if _, err = io.Copy(w, f); err != nil {
-			PrintErr("ERROR", "%s", err)
-			w.WriteHeader(http.StatusInternalServerError)
-			fmt.Fprintln(w, InternalServerErrorMessage)
-		}
+		http.ServeContent(w, r, meta.Key, meta.Timestamp, f)
 	} else {
 		rev, err := s.Store.Latest(key)
 		if err == ErrNoSuchArtifact {

@@ -22,7 +22,6 @@ import (
 var (
 	ErrRevisionDeleted = errors.New("This revesion has been deleted.")
 	ErrNoSuchArtifact  = errors.New("No such artifact on this server.")
-	ErrInvalidRange    = errors.New("Requested range is not satisfiable.")
 )
 
 type Metadata struct {
@@ -42,7 +41,7 @@ type RetainPolicy struct {
 type Store interface {
 	Latest(key string) (revision int, err error)
 	Metadata(key string, revision int) (Metadata, error)
-	Get(key string, revision int, rangeFrom, rangeTo int64) (io.ReadCloser, Metadata, error)
+	Get(key string, revision int, req RangeRequest) (io.ReadCloser, Metadata, error)
 	Put(key string, r io.Reader) (revision int, err error)
 	Sweep()
 }
@@ -157,7 +156,7 @@ func consumeUntil(f io.Reader, pos int64) error {
 	return err
 }
 
-func (s LocalStore) Get(key string, revision int, rangeFrom, rangeTo int64) (io.ReadCloser, Metadata, error) {
+func (s LocalStore) Get(key string, revision int, rangeRequest RangeRequest) (io.ReadCloser, Metadata, error) {
 	f, err := s.open(key, revision)
 	if errors.Is(err, os.ErrNotExist) {
 		if latest, err := s.Latest(key); err != nil {
@@ -174,12 +173,12 @@ func (s LocalStore) Get(key string, revision int, rangeFrom, rangeTo int64) (io.
 		return nil, Metadata{}, err
 	}
 
-	if rangeFrom != 0 || rangeTo != 0 {
-		if rangeFrom < 0 || rangeTo <= rangeFrom || meta.Size < rangeTo {
+	if rangeRequest.Requested() {
+		if meta.Size < rangeRequest.From+rangeRequest.Size() {
 			return nil, Metadata{}, ErrInvalidRange
 		}
 
-		if err = consumeUntil(f, rangeFrom); err != nil {
+		if err = consumeUntil(f, rangeRequest.From); err != nil {
 			return nil, Metadata{}, err
 		}
 	}

@@ -80,7 +80,7 @@ func TestLocalStore(t *testing.T) {
 		time.Sleep(10 * time.Millisecond) // Wait for goroutine to remove old revisions.
 
 		for i, data := range tt.Data {
-			f, meta, err := store.Get(tt.Key, i+1, 0, 0)
+			f, meta, err := store.Get(tt.Key, i+1, RangeRequest{})
 			if f != nil {
 				defer f.Close()
 			}

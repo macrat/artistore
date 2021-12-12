@@ -142,6 +142,10 @@ func (w DummyWriter) Write(p []byte) (int, error) {
 func (f *LocalFileReader) Seek(offset int64, whence int) (int64, error) {
 	switch whence {
 	case io.SeekStart:
+		if offset == f.pos {
+			return offset, nil
+		}
+
 		_, err := f.f.Seek(0, io.SeekStart)
 		if err != nil {
 			return 0, err
@@ -159,6 +163,13 @@ func (f *LocalFileReader) Seek(offset int64, whence int) (int64, error) {
 		if err != nil {
 			return 0, err
 		}
+
+		if offset == 0 {
+			// NOTE: This is cheat for enhance performance.
+			// http.ServeContent uses this method with SeekEnd only to check file size.
+			return int64(meta.Size), nil
+		}
+
 		return f.Seek(int64(meta.Size)-offset, io.SeekStart)
 	}
 

@@ -80,7 +80,7 @@ func TestLocalStore(t *testing.T) {
 		time.Sleep(10 * time.Millisecond) // Wait for goroutine to remove old revisions.
 
 		for i, data := range tt.Data {
-			f, meta, err := store.Get(tt.Key, i+1)
+			f, meta, err := store.Get(tt.Key, i+1, 0, 0)
 			if f != nil {
 				defer f.Close()
 			}
@@ -102,7 +102,7 @@ func TestLocalStore(t *testing.T) {
 					t.Fatalf("%s#%d: revision of #%d should be %d but got %d", tt.Key, tt.Revision, i+1, i+1, meta.Revision)
 				}
 
-				if meta.Size != len(data) {
+				if meta.Size != int64(len(data)) {
 					t.Fatalf("%s#%d: size of #%d should be %d but got %d", tt.Key, tt.Revision, i+1, len(data), meta.Size)
 				}
 
@@ -116,6 +116,33 @@ func TestLocalStore(t *testing.T) {
 					t.Fatalf("%s#%d: unexpected body of revision %d: %q", tt.Key, tt.Revision, i+1, buf)
 				}
 			}
+		}
+	}
+}
+
+func TestConsumeUntil(t *testing.T) {
+	tests := []struct {
+		Input  string
+		Pos    int64
+		Expect string
+	}{
+		{"hello world", 0, "hello world"},
+		{"hello world", 6, "world"},
+		{"hello world", 11, ""},
+	}
+
+	for _, tt := range tests {
+		f := bytes.NewReader([]byte(tt.Input))
+		if err := consumeUntil(f, tt.Pos); err != nil {
+			t.Errorf("failed to read %d bytes from %q: %s", tt.Pos, tt.Input, err)
+		}
+
+		output, err := io.ReadAll(f)
+		if err != nil {
+			t.Errorf("failed to read remain after read %d bytes from %q: %s", tt.Pos, tt.Input, err)
+		}
+		if string(output) != tt.Expect {
+			t.Errorf("read %d bytes from %q should be %q but got %q", tt.Pos, tt.Input, tt.Expect, string(output))
 		}
 	}
 }

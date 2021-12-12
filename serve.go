@@ -184,7 +184,7 @@ func (s Server) Get(key string, w http.ResponseWriter, r *http.Request) {
 		} else {
 			path := s.pathTo(key, rev)
 			w.Header().Set("Location", path)
-			w.WriteHeader(http.StatusFound)
+			w.WriteHeader(http.StatusSeeOther)
 			fmt.Fprintln(w, "http://"+r.Host+path)
 		}
 	}

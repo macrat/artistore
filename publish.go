@@ -15,7 +15,7 @@ import (
 )
 
 var publishCmd = &cobra.Command{
-	Use:   "publish FILE_KEY",
+	Use:   "publish KEY",
 	Short: "Publish an artifact to Artistore",
 	Long:  "Publish an artifact to Artistore.",
 	Example: `  $ artistore publish library.js

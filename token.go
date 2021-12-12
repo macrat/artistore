@@ -50,21 +50,27 @@ Please set secret to ARTISTORE_SECRET environment variable of the server.`,
 }
 
 var tokenCmd = &cobra.Command{
-	Use:   "token FILE_KEY",
+	Use:   "token KEY",
 	Short: "Generate token",
-	Long: `Generate token.
+	Long: `Generate token to publish artifacts to the server.
 
-The token is used when publish artifacts to the server.`,
+If the key has slash at the end, it will work as prefix of key.
+For example, token that generated for key "hello/" can publish artifacts starts with "hello/" such as "hello/world" or "hello/artistore".`,
 	Example: `  # Generate token for bundle.js by secret.
   $ export ARTISTORE_SECRET="your-secret-here"
-  $ artistore token bundle.js
+  $ artistore token prefix/
 
   # And then, publish an artifact.
-  $ artistore publish your-artifact.dat`,
+  $ artistore publish prefix/your-artifact.dat`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		err := VerifyKey(args[0])
-		if err != nil {
+		if err == ErrSlashKey {
+			if args[0][0] == '/' {
+				fmt.Fprintln(os.Stderr, "Invalid key: slash can not be the first character of key for token.")
+				os.Exit(2)
+			}
+		} else if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
 		}
@@ -171,5 +177,13 @@ func (t Token) Salt() []byte {
 }
 
 func IsCorrentToken(s Secret, t Token, key string) bool {
-	return hmac.Equal(NewTokenWithSalt(s, key, t.Salt()), t)
+	if hmac.Equal(NewTokenWithSalt(s, key, t.Salt()), t) {
+		return true
+	}
+	for _, k := range KeyPrefixes(key) {
+		if hmac.Equal(NewTokenWithSalt(s, k, t.Salt()), t) {
+			return true
+		}
+	}
+	return false
 }

@@ -3,12 +3,13 @@ package main
 import (
 	"errors"
 	"regexp"
+	"strings"
 )
 
 var (
 	ErrEmptyKey   = errors.New("Invalid key: can not use empty key.")
-	ErrSlashKey   = errors.New("Invalid key: key can not have slash at first or last.")
-	ErrInvalidKey = errors.New("invalid key: this key contains invalid character.")
+	ErrSlashKey   = errors.New("Invalid key: slash can not be the first or the last character of key.")
+	ErrInvalidKey = errors.New("Invalid key: this key contains invalid character.")
 
 	keyRegexp = regexp.MustCompile(`^[-._~!$&'()*+,;=:@%/a-zA-Z0-9]+$`)
 )
@@ -27,4 +28,22 @@ func VerifyKey(key string) error {
 	}
 
 	return nil
+}
+
+func KeyPrefixes(key string) []string {
+	if !strings.ContainsRune(key, '/') {
+		return []string{}
+	}
+
+	xs := strings.Split(key, "/")
+	xs = xs[:len(xs)-1]
+	results := make([]string, len(xs))
+
+	x := ""
+	for i := range results {
+		x += xs[i] + "/"
+		results[len(results)-i-1] = x
+	}
+
+	return results
 }

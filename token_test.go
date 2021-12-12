@@ -43,12 +43,12 @@ func TestToken(t *testing.T) {
 	}
 	t.Logf("secret: %s", s)
 
-	t1, err := NewToken(s, "hello")
+	t1, err := NewToken(s, "hello/world")
 	if err != nil {
 		t.Fatalf("failed to generate token: %s", err)
 	}
 
-	t2, err := NewToken(s, "hello")
+	t2, err := NewToken(s, "hello/world")
 	if err != nil {
 		t.Fatalf("failed to generate token: %s", err)
 	}
@@ -57,15 +57,22 @@ func TestToken(t *testing.T) {
 		t.Errorf("token should different but same: %s", t1)
 	}
 
+	t3, err := NewToken(s, "hello/")
+	if err != nil {
+		t.Fatalf("failed to generate token: %s", err)
+	}
+
 	tests := []struct {
 		name   string
 		tok    Token
 		key    string
 		expect bool
 	}{
-		{"token1", t1, "hello", true},
-		{"token2", t2, "hello", true},
-		{"token1", t1, "world", false},
+		{"token1", t1, "hello/world", true},
+		{"token2", t2, "hello/world", true},
+		{"token1", t1, "world/hello", false},
+		{"token3", t3, "hello/world", true},
+		{"token3", t3, "hello/artistore", true},
 	}
 
 	for _, tt := range tests {

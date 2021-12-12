@@ -21,24 +21,24 @@ $ artistore serve --store ./path/to/storage
 ### 3. Publish your artifact
 
 ``` shell
-$ artistore publish filename.txt
+$ artistore publish prefix/filename.txt
 ```
 
 or
 
 ``` shell
-$ export ARTISTORE_TOKEN=$(artistore token filename.txt)
-$ curl -H "Authorization: bearer ${ARTISTORE_TOKEN}" --data-binary '@file.txt' http://localhost:3000/filename.txt
+$ export ARTISTORE_TOKEN=$(artistore token prefix/)
+$ curl -H "Authorization: bearer ${ARTISTORE_TOKEN}" --data-binary '@file.txt' http://localhost:3000/prefix/filename.txt
 ```
 
 ### 4. Download and use your artifact
 
 ``` shell
-$ artistore get filename.txt
+$ artistore get prefix/filename.txt
 ```
 
 or
 
 ``` shell
-$ curl -L https://localhost:3000/filename.txt
+$ curl -L https://localhost:3000/prefix/filename.txt
 ```
